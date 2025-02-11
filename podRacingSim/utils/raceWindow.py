@@ -44,20 +44,11 @@ class RaceWindow:
         self.canvas = tk.Canvas(master, width=self.width, height=self.height, bg='#C2B280')  # Desert sand
         self.canvas.pack(fill='both', expand=True)
         
-        # Increase sand particles for more desert feel
-        self.sand_particles = [(random.randint(0, self.width), 
-                              random.randint(0, self.height), 
-                              random.uniform(1, 4))  # Larger size variation
-                             for _ in range(int((self.width * self.height) / 1000))]  # More particles
-        
         # Add dune positions
         self.dunes = [(random.randint(0, self.width), 
                       random.randint(self.height//2, self.height),
                       random.randint(100, 300))  # Dune sizes
                      for _ in range(5)]
-        
-        # Heat wave effect parameters
-        self.heat_wave_offset = 0
         
         # More vibrant pod colors
         self.pod_colors = ['#FF0000', '#00FF00', '#0088FF', '#FF00FF', 
@@ -81,7 +72,7 @@ class RaceWindow:
         ]
         return shapes
         
-    def draw_race(self, racers, distance, obstacles, speed_gates):
+    def draw_race(self, racers, distance):
         self.canvas.delete("all")
         
         # Draw desert background
@@ -107,60 +98,21 @@ class RaceWindow:
                                           finish_x + 20, y + stripe_height,
                                           fill=color, outline='')
         
-        # Draw obstacles
-        for obstacle in obstacles:
-            points = obstacle.get_shape_points()
-            shadow_points = [(x+2, y+2) for x, y in points]
-            self.canvas.create_polygon(shadow_points,
-                                    fill='#463E3F',
-                                    outline='')
-            self.canvas.create_polygon(points,
-                                    fill=obstacle.color,
-                                    outline='#463E3F',
-                                    width=1)
-        
-        # Draw speed gates
-        for gate in speed_gates:
-            y = gate.y_pos
-            
-            for i in range(3):
-                size = gate.size - (i * 5)
-                opacity = ['#00FFFF', '#00CCCC', '#009999'][i]
-                points = []
-                for j in range(4):
-                    angle = j * math.pi / 2 + math.pi / 4
-                    px = gate.x_pos + size * math.cos(angle)
-                    py = y + size * math.sin(angle)
-                    points.append((px, py))
-                self.canvas.create_polygon(points,
-                                        fill=opacity if not gate.activated else '#335577',
-                                        outline='white',
-                                        width=1)
-        
-        # Draw racers
-        num_racers = len(racers)
+        # Draw racers with direct coordinates
         for i, racer in enumerate(racers):
+            x, y = racer.get_position()
+            
             if racer.destroyed or racer.is_exploding:
                 frame_progress = racer.explosion_frame / racer.max_explosion_frames
                 size = 15 * (1 + frame_progress)
-                x = (racer.position / distance) * (self.width - 100)
-                y = (i + 1) * (self.height / (num_racers + 1))
                 
                 self.canvas.create_oval(x-size, y-size, x+size, y+size,
                                      fill='#FF4500',
                                      outline='#FF0000',
                                      width=1)
-                
-                racer.explosion_frame += 1
-                if racer.explosion_frame >= racer.max_explosion_frames:
-                    racer.is_exploding = False
-                    racer.destroyed = True
-                    racer.finished = True
                 continue
             
-            x = (racer.position / distance) * (self.width - 100)
-            y = (i + 1) * (self.height / (num_racers + 1))
-            
+            # Draw racer shape
             shadow_shape = [(x+cx+2, y+cy+2) for cx,cy in self.pod_shapes[i]]
             self.canvas.create_polygon(shadow_shape,
                                     fill='#463E3F',
@@ -200,15 +152,15 @@ class RaceWindow:
                 continue
             
             self.canvas.create_text(200, y + 10,
-                                  text=f"Speed: {racer.speed:.2f}x",
+                                  text=f"Speed: {racer.velocity_x:.2f}x",
                                   fill='white',
                                   anchor='w')
             self.canvas.create_text(350, y + 10,
-                                  text=f"Distance: {racer.position:.1f}m",
+                                  text=f"Distance: {racer.x:.1f}m",
                                   fill='white',
                                   anchor='w')
             
-            progress = (racer.position / distance) * 150
+            progress = (racer.x / distance) * 150
             self.canvas.create_rectangle(500, y + 5, 650, y + 15, 
                                       outline='white')
             self.canvas.create_rectangle(500, y + 5, 500 + progress, y + 15,
@@ -269,20 +221,6 @@ class RaceWindow:
                 
                 racer.boost_animation_frames -= 1
 
-            if racer.speed_gate_animation_frames > 0:
-                progress = racer.speed_gate_animation_frames / racer.max_speed_gate_animation_frames
-                ring_size = 40 * (1 - progress)
-                ring_opacity = ['#00FFFF', '#00CCFF', '#0088FF'][int(progress * 2.99)]
-                
-                for ring in range(3):
-                    ring_radius = ring_size * (1 - ring * 0.2)
-                    self.canvas.create_oval(x - ring_radius, y - ring_radius,
-                                         x + ring_radius, y + ring_radius,
-                                         outline=ring_opacity,
-                                         width=2)
-                
-                racer.speed_gate_animation_frames -= 1
-
         message_height = 30
         for i, (message, color, frames_left) in enumerate(self.event_messages):
             self.canvas.create_text(self.width/2, 50 + i*message_height,
@@ -337,12 +275,6 @@ class RaceWindow:
             self.play_sound('countdown')
         elif count == 0:
             self.play_sound('start')
-        # Draw basic track elements
-        for particle in self.sand_particles:
-            x, y, size = particle
-            self.canvas.create_oval(x, y, x+size, y+size, 
-                                  fill='#F4A460', 
-                                  outline='#DEB887')
             
         finish_x = self.width - 60
         self.canvas.create_rectangle(finish_x, 0, finish_x + 20, self.height, fill='#A0522D')
@@ -441,8 +373,8 @@ class RaceWindow:
             
             # Add stats with shadow effect
             stats_x = x + 200
-            odds = round(1.0 / racer.speed * 2, 2)
-            stats_text = f"Speed: {racer.speed:.2f}x   Odds: {odds}:1"
+            odds = round(1.0 / racer.velocity_x * 2, 2)
+            stats_text = f"Speed: {racer.velocity_x:.2f}x   Odds: {odds}:1"
             
             # Add shadow
             self.canvas.create_text(stats_x+1, y + entry_height/2 + 1,
@@ -519,8 +451,8 @@ class RaceWindow:
                                     outline='white',
                                     width=2)
             
-            # Calculate odds based on speed (higher speed = lower odds)
-            odds = round(1.0 / racer.speed * 2, 2)
+            # Calculate odds based on velocity_x instead of speed
+            odds = round(1.0 / racer.velocity_x * 2, 2)
             
             # Draw racer info with agility stat
             self.canvas.create_text(x + card_width - 100, y + 40,
@@ -528,7 +460,7 @@ class RaceWindow:
                                   fill=self.pod_colors[i],
                                   font=('Arial', 16, 'bold'))
             self.canvas.create_text(x + card_width - 100, y + 70,
-                                  text=f"Base Speed: {racer.speed:.2f}x",
+                                  text=f"Base Speed: {racer.velocity_x:.2f}x",
                                   fill='white',
                                   font=('Arial', 12))
             self.canvas.create_text(x + card_width - 100, y + 85,  # Add agility stat

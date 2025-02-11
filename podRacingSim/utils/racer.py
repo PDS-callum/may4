@@ -1,166 +1,136 @@
 import random
+import math
 
 class Racer:
     def __init__(self, name):
+        # Basic properties
         self.name = name
-        self.position = 0
         self.finished = False
-        self.base_speed = random.uniform(1, 1.4)
-        self.speed = self.base_speed
-        self.slowdown_timer = 0
-        self.active_event = None
-        self.event_duration = 0
         self.destroyed = False
-        self.y_offset = 0
-        self.max_y_offset = 25
-        self.current_lane_position = 0
-        self.target_lane_position = 0
-        self.boost_timer = 0
-        self.boost_multiplier = 1.0
-        self.explosion_frame = 0
-        self.max_explosion_frames = 30
-        self.is_exploding = False
+        
+        # Position and movement
+        self.x = 0  # X coordinate
+        self.y = 0  # Y coordinate
+        self.velocity_x = random.uniform(0.3, 0.5)  # Reduced from (1, 1.4)
+        self.velocity_y = 0  # Vertical speed
+        self.max_velocity_y = 3.0  # Reduced from 6.0
+        self.acceleration = 0.15  # Reduced from 0.3
+        self.friction = 0.05  # Reduced from 0.1 for smoother movement
+        
+        # Race stats
+        self.base_speed = self.velocity_x
         self.agility = random.uniform(0.8, 1.5)
         self.max_health = random.randint(80, 150)
         self.current_health = self.max_health
+        
+        # Status effects
+        self.active_event = None
+        self.event_duration = 0
+        self.boost_multiplier = 1.0
+        self.boost_timer = 0
+        
+        # Visual effects
+        self.explosion_frame = 0
+        self.max_explosion_frames = 30
+        self.is_exploding = False
+        self.boost_animation_frames = 0
+        self.max_boost_animation_frames = 20
+        
+        # Health regeneration
         self.health_regen_timer = 0
         self.health_regen_delay = 500
         self.health_regen_rate = 0.2
-        self.seek_range = 400
-        self.avoid_range = 300
-        self.momentum_smoothing = 0
-        self.vertical_momentum = 0
-        self.center_threshold = 0
-        self.is_centered = False
-        self.move_speed = 2.0  # Speed of vertical movement
-        self.base_move_speed = 1.0  # Base speed of vertical movement
-        self.max_move_speed = 4.0  # Maximum vertical movement speed 
-        self.current_move_speed = 0  # Current vertical movement speed
-        self.acceleration = 0.2  # How quickly speed builds up
-        self.active_direction = 0  # Current direction of movement (-1, 0, or 1)
-        self.speed_boost_amount = 1.5  # 50% speed increase when boosted
-        self.speed_penalty_amount = 0.6  # 40% speed decrease when hit
-        self.speed_effect_duration = 45  # Duration of speed effects in frames
-        self.speed_effect_timer = 0  # Timer for temporary speed effects
-        self.normal_speed = 0  # Store normal speed during effects
-        self.boost_animation_frames = 0
-        self.max_boost_animation_frames = 20  # Duration of boost animation
-        self.speed_gate_animation_frames = 0
-        self.max_speed_gate_animation_frames = 20  # Duration of speed gate animation
 
-    def update_movement(self, nearest_gate, nearest_obstacle, height):
-        target_y = self.y_offset
-        new_direction = 0
+    def set_initial_position(self, total_racers, index, window_height):
+        """Set the initial y position based on total racers"""
+        lane_height = window_height / (total_racers + 1)
+        self.y = lane_height * (index + 1)
+        self.target_y = self.y
 
-        if nearest_obstacle and nearest_obstacle[1] < self.avoid_range:
-            if nearest_obstacle[0].y_pos > self.y_offset:
-                target_y = self.y_offset - nearest_obstacle[0].size
-            else:
-                target_y = self.y_offset + nearest_obstacle[0].size
-        elif nearest_gate and nearest_gate[1] < self.seek_range and not nearest_gate[0].activated:
-            target_y = nearest_gate[0].y_offset * height
-
-        diff = target_y - self.y_offset
-        if abs(diff) > 0.1:
-            new_direction = 1 if diff > 0 else -1
+    def update_position(self, delta_time, window_width, window_height):
+        """Update position based on velocities and time"""
+        # Update x position
+        base_movement = self.velocity_x * self.boost_multiplier * delta_time
+        if self.active_event:
+            base_movement *= self.active_event.speed_modifier
         
-        if new_direction != self.active_direction:
-            self.current_move_speed = self.base_move_speed
-            self.active_direction = new_direction
-        else:
-            self.current_move_speed = min(
-                self.current_move_speed + self.acceleration * self.agility,
-                self.max_move_speed * self.agility
-            )
+        self.x += base_movement
+        
+        # Update y position with smooth acceleration and deceleration
+        if abs(self.velocity_y) > 0:
+            self.y += self.velocity_y * delta_time * self.agility  # Added agility factor
+            self.velocity_y *= (1 - self.friction)
+            if abs(self.velocity_y) < 0.1:
+                self.velocity_y = 0
+        
+        # Keep racer within screen bounds with bounce effect
+        if self.y < 50:
+            self.y = 50
+            self.velocity_y = abs(self.velocity_y) * 0.5  # Bounce up
+        elif self.y > window_height - 50:
+            self.y = window_height - 50
+            self.velocity_y = -abs(self.velocity_y) * 0.5  # Bounce down
+        
+        # Check if finished
+        if self.x >= window_width - 100:
+            self.x = window_width - 100
+            self.finished = True
 
-        if self.active_direction != 0:
-            movement = self.current_move_speed * self.active_direction
-            self.y_offset += movement
-
-        self.y_offset = max(min(self.y_offset, self.max_y_offset), -self.max_y_offset)
-
-    def update_speed(self):
-        """Update speed based on timers and effects"""
-        if self.speed_effect_timer > 0:
-            self.speed_effect_timer -= 1
-            if self.speed_effect_timer == 0:
-                self.speed = self.normal_speed  # Restore normal speed
-
-        if self.slowdown_timer > 0:
-            self.slowdown_timer -= 1
-            if self.slowdown_timer == 0:
-                self.speed = self.base_speed  # Restore original speed
-
-        if self.boost_timer > 0:
-            self.boost_timer -= 1
-            if self.boost_timer == 0:
-                self.boost_multiplier = 1.0
-
-    def update_health(self):
-        """Handle health regeneration"""
-        if self.health_regen_timer < self.health_regen_delay:
-            self.health_regen_timer += 1
-        elif self.current_health < self.max_health:
-            self.current_health = min(self.max_health, 
-                                    self.current_health + self.health_regen_rate)
+    def move_vertical(self, direction):
+        """Apply vertical movement (-1 for up, 1 for down)"""
+        target_velocity = direction * self.max_velocity_y * self.agility
+        self.velocity_y = target_velocity
 
     def apply_event(self, event):
         """Apply an event effect to the racer"""
         self.active_event = event
         self.event_duration = event.duration
-
-    def apply_slowdown(self):
-        """Apply a temporary speed reduction"""
-        self.speed *= 0.8  # Slow down to 80% speed
-        self.slowdown_timer = 60  # Recover after 60 frames
-
-    def apply_boost(self):
-        """Apply a temporary speed boost"""
-        self.boost_timer = 45  # Boost duration
-        self.boost_multiplier = 2.0  # Double speed
-
-    def take_obstacle_damage(self):
-        """Handle collision damage from obstacles"""
-        base_damage = random.randint(20, 45)
-        speed_multiplier = self.speed * self.boost_multiplier
-        total_damage = base_damage * speed_multiplier
-        
-        self.current_health = max(0, self.current_health - total_damage)
-        self.health_regen_timer = 0  # Reset regeneration timer
-        
-        if self.current_health <= 0:
+        if event.lethal:
             self.is_exploding = True
             self.explosion_frame = 0
 
-    def apply_speed_boost(self):
-        """Apply temporary speed boost from gates"""
-        self.normal_speed = self.speed  # Store current speed
-        self.speed *= self.speed_boost_amount
-        self.speed_effect_timer = self.speed_effect_duration
-        self.boost_animation_frames = self.max_boost_animation_frames  # Start animation
-        self.speed_gate_animation_frames = self.max_speed_gate_animation_frames  # Start speed gate animation
+    def apply_boost(self):
+        """Apply a temporary speed boost"""
+        self.boost_timer = 45
+        self.boost_multiplier = 2.0
+        self.boost_animation_frames = self.max_boost_animation_frames
 
-    def apply_speed_penalty(self):
-        """Apply temporary speed reduction from obstacles"""
-        self.normal_speed = self.speed  # Store current speed
-        self.speed *= self.speed_penalty_amount
-        self.speed_effect_timer = self.speed_effect_duration
-
-    def update_position(self, distance, height):
-        """Update the racer's position based on speed and events"""
-        base_movement = random.uniform(1.0, 2.0) * self.speed * 20 * self.boost_multiplier
+    def update(self, delta_time, window_width, window_height):
+        """Main update method to be called each frame"""
+        # Update position
+        self.update_position(delta_time, window_width, window_height)
+        
+        # Update boost
+        if self.boost_timer > 0:
+            self.boost_timer -= 1
+            if self.boost_timer == 0:
+                self.boost_multiplier = 1.0
+        
+        # Update event
         if self.active_event:
-            base_movement *= self.active_event.speed_modifier
+            self.event_duration -= 1
+            if self.event_duration <= 0:
+                self.active_event = None
         
-        self.position += base_movement
-        if self.position >= distance:
-            self.position = distance
-            self.finished = True
+        # Update health regeneration
+        if self.health_regen_timer < self.health_regen_delay:
+            self.health_regen_timer += 1
+        elif self.current_health < self.max_health:
+            self.current_health = min(self.max_health, 
+                                    self.current_health + self.health_regen_rate)
         
-        # Update y position based on y_offset
-        self.y_pos = self.y_offset * height
+        # Update explosion animation
+        if self.is_exploding:
+            self.explosion_frame += 1
+            if self.explosion_frame >= self.max_explosion_frames:
+                self.is_exploding = False
+                self.destroyed = True
+                self.finished = True
 
-    def set_initial_y_position(self, index, total_racers, height):
-        """Set the initial y position of the racer based on its index and total number of racers"""
-        self.y_offset = (index + 1) / (total_racers + 1)
-        self.y_pos = self.y_offset * height
+    def get_progress(self, race_distance):
+        """Get race progress as a percentage"""
+        return (self.x / race_distance) * 100
+
+    def get_position(self):
+        """Get current coordinates"""
+        return (self.x, self.y)
